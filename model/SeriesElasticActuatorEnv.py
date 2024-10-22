@@ -10,6 +10,10 @@ class SeriesElasticActuatorEnv(gym.Env):
         self.joint_theta = np.float32
         self.joint_theta_dot = np.float32
 
+        # include goals to input
+        self.goal_theta = 1.0
+        self.goal_theta_dot = 1.0
+
         # Initialize the SingleSEA system with default parameters
         params = {
             'J_m': 0.44,           # Motor inertia (kg·m²)
@@ -48,8 +52,8 @@ class SeriesElasticActuatorEnv(gym.Env):
 
     def _get_info(self):
         return {
-            "distance": np.linalg.norm(
-                self._agent_location - self._target_location, ord=1
+            "distance to goal": np.linalg.norm(
+                self.motor_theta - self.goal_theta, ord=2
             )
         }
 
@@ -76,13 +80,16 @@ class SeriesElasticActuatorEnv(gym.Env):
         if not success:
             print("Did not send command successfully")
         
+        # update state from sensors
         self.motor_theta = self.read_motor_sensor()
         self.joint_theta = self.read_joint_sensor()
+        self.motor_theta_dot = self.read_motor_sensor()
+        self.joint_theta_dot = self.read_joint_sensor()
 
         # An environment is completed if and only if the agent has reached the target
-        terminated = np.array_equal(self._agent_location, self._target_location)
+        terminated = np.array_equal(self.motor_theta, self.goal_theta) and np.array_equal(self.motor_theta_dot, self.goal_theta_dot)
         truncated = False
-        reward = 1 if terminated else 0  # the agent is only reached at the end of the episode
+        reward = self.get_reward(terminated)
         observation = self._get_obs()
         info = self._get_info()
 
@@ -97,3 +104,19 @@ class SeriesElasticActuatorEnv(gym.Env):
     def send_current_cmd(self, current_cmd: np.float32):
         success = True
         return success
+    
+    def get_reward(self, terminated):
+        position_control_weight = 1.0
+        velcoity_control_weight = 1.0
+        response_weight = 1.0
+
+        if terminated:
+            reward = 100.0 # adjust to find an accurate goal achievement
+        else:
+            reward = position_control_weight * abs(self.motor_theta - self.joint_theta) + \
+                     velcoity_control_weight * abs(self.motor_theta_dot - self.joint_theta_dot) + \
+                     response_weight * (self.system.K_s * abs(self.goal_theta - self.joint_theta) + \
+                                        self.system.B_m * abs(self.goal_theta_dot - self.joint_theta_dot) - \
+                                        self.system.k_s * abs(self.motor_theta))
+        
+        return reward
