@@ -10,7 +10,6 @@ class SingleSEA:
         self.K_s = params['K_s']
         self.B_m = params['B_m']
         self.link_length = params['link_length']
-        self.K_t = params['K_t']
 
         # External force parameters
         self.F = params.get('F', 0.0)         # Force magnitude
@@ -71,12 +70,9 @@ class SingleSEA:
     
     def set_desired_state(self, state_desired):
         self.x_des = state_desired
-    
-    def set_K_t(self, K_t):
-        self.K_t = K_t
 
-    def set_ff_tau(self, current):
-        self.ff_tau = self.K_t * current
+    def set_ff_tau(self, ff_tau):
+        self.ff_tau = ff_tau
 
     def set_use_gains(self, use_gains):
         self.use_gains = use_gains
