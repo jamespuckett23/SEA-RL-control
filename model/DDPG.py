@@ -54,21 +54,58 @@ class ReplayBuffer:
         self.batch_size = batch_size
     
     def add(self, state, action, reward, next_state, done):
+        state = np.array(state, dtype=np.float32)
+        action = np.array(action, dtype=np.float32)
+        reward = np.float32(reward)  # Ensure reward is a scalar float
+        next_state = np.array(next_state, dtype=np.float32)
+        done = np.float32(done)  # Convert done to a float for consistency (0.0 or 1.0)
+        
         self.buffer.append((state, action, reward, next_state, done))
     
     def sample(self):
         batch = random.sample(self.buffer, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
-        return (
-            torch.FloatTensor(states),
-            torch.FloatTensor(actions),
-            torch.FloatTensor(rewards).unsqueeze(1),
-            torch.FloatTensor(next_states),
-            torch.FloatTensor(dones).unsqueeze(1)
-        )
+        
+        # Convert directly to torch tensors with proper shapes
+        states = torch.FloatTensor(np.array(states))
+        actions = torch.FloatTensor(np.array(actions))
+        # rewards = torch.FloatTensor(np.array(rewards)).unsqueeze(1)
+        rewards = torch.FloatTensor([float(r) for r in rewards]).unsqueeze(1)
+        next_states = torch.FloatTensor(np.array(next_states))
+        dones = torch.FloatTensor(dones).unsqueeze(1)  # Reshape dones to (batch_size, 1)
+
+        return states, actions, rewards, next_states, dones
     
     def __len__(self):
         return len(self.buffer)
+
+# class ReplayBuffer:
+#     def __init__(self, buffer_size, batch_size):
+#         self.buffer = []
+#         self.buffer_size = buffer_size
+
+#     def add(self, state, action, reward, next_state, done):
+#         self.buffer.append((state, action, reward, next_state, done))
+#         if len(self.buffer) > self.buffer_size:
+#             self.buffer.pop(0)
+
+#     def sample(self, batch_size):
+#         samples = random.sample(self.buffer, batch_size)
+#         states, actions, rewards, next_states, dones = zip(*samples)
+        
+#         # Convert them to tensors, ensuring they are in the right format
+#         states = torch.FloatTensor(np.array(states))
+#         actions = torch.FloatTensor(np.array(actions))
+        
+#         # Make sure rewards are simple scalars
+#         rewards = torch.FloatTensor([float(r) for r in rewards]).unsqueeze(1)
+#         next_states = torch.FloatTensor(np.array(next_states))
+#         dones = torch.FloatTensor(np.array(dones)).unsqueeze(1)
+
+#         return states, actions, rewards, next_states, dones
+    
+#     def __len__(self):
+#         return len(self.buffer)
 
 # DDPG agent
 class DDPGAgent:

@@ -1,7 +1,7 @@
 # single_sea_env.py
 
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import math
 import matplotlib.pyplot as plt
@@ -30,7 +30,7 @@ class SingleSEAEnv(gym.Env):
         self.system = SingleSEA(params)
 
         # Action space: Discrete actions representing torque from -350 to 350 N·m in increments of 1
-        self.action_space = spaces.Discrete(701)  # Actions 0 to 700
+        self.action_space = spaces.Box(low=-np.pi, high=np.pi, dtype=np.float32)
 
         # Observation space: [theta_m, omega_m, theta_j, omega_j]
         high = np.array([np.pi, 20.0, np.pi, 20.0, np.pi, 350.0])
@@ -97,6 +97,10 @@ class SingleSEAEnv(gym.Env):
         self.s = sol.y[:, -1]
         # Update state
         self.state = self.s
+        # clamp theta values
+        self.state[0] = (self.state[0] + np.pi) % (2 * np.pi) - np.pi  # For theta_m
+        self.state[2] = (self.state[2] + np.pi) % (2 * np.pi) - np.pi  # For theta_j
+
         print("Desired State: ", self.desired_state)
         print("Current State: ", self.state)
         self.time_elapsed += self.dt
@@ -120,13 +124,13 @@ class SingleSEAEnv(gym.Env):
         # Negative of mean squared error to minimize it, minus a small time penalty
         time_penalty = 1000.0  # Adjust the time penalty coefficient as needed
         # reward = -1000.0*position_error - time_penalty * self.time_elapsed
-        # reward = -1000.0*position_error - velocity_error - 10.0 * torque_error - torque_penalty - torque_violation_penalty
-        reward = -100000.0*position_error 
+        reward = -100.0*position_error - 1.0*velocity_error - 10.0 * torque_error - torque_penalty - torque_violation_penalty
+        # reward = -100000.0*position_error 
 
         # Check if the mean squared error is below the threshold
         done = position_error <= self.mse_threshold
         if done:
-            reward = 2000.0
+            reward = 2e10
         # Additional info (optional)
         info = {
             'mse': mse,
