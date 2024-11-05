@@ -13,7 +13,7 @@ from scipy.integrate import solve_ivp
 class SingleSEAEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, visualize=False, mse_threshold=0.01):
+    def __init__(self, visualize=True, mse_threshold=0.01):
         super(SingleSEAEnv, self).__init__()
 
         # Initialize the SingleSEA system with default parameters
@@ -41,7 +41,11 @@ class SingleSEAEnv(gym.Env):
         )
 
         # Initial state
+        # State vector: [theta_motor, omega_motor, theta_joint, omega_joint, desired_position, desired_torque]
         self.state = np.array([0.0, 0.0, 0.0, 0.0])
+
+        # position error, angular velocity error, torque error
+        self.previous_state_error = np.array([0.0, 0.0, 0.0])
 
         # Time parameters
         self.dt = 0.005  # Time step
@@ -53,6 +57,7 @@ class SingleSEAEnv(gym.Env):
             self._setup_visualization()
 
         # Placeholder for desired state (will be set in reset)
+        # desired state: theta position, angular position
         self.desired_state = np.array([0.0, 0.0])
 
         # Mean squared error threshold for episode termination
@@ -71,7 +76,7 @@ class SingleSEAEnv(gym.Env):
 
     def step(self, action):
         # Map the action index to torque value
-        torque = action - 350  # Torque ranges from -350 to 350 N·m
+        torque = 350/np.pi * action # Torque ranges from -350 to 350 N·m
 
         # Set the torque command
         self.system.set_ff_tau(torque)
@@ -97,25 +102,31 @@ class SingleSEAEnv(gym.Env):
         self.s = sol.y[:, -1]
         # Update state
         self.state = self.s
-        # clamp theta values
+        # clamp theta values to prevent angle wind up
         self.state[0] = (self.state[0] + np.pi) % (2 * np.pi) - np.pi  # For theta_m
         self.state[2] = (self.state[2] + np.pi) % (2 * np.pi) - np.pi  # For theta_j
 
-        print("Desired State: ", self.desired_state)
-        print("Current State: ", self.state)
         self.time_elapsed += self.dt
 
         # Optionally render the environment
         if self.visualize:
             self.render(self.F, self.alpha)
 
+        position_error_weight = 2.5
+        velocity_error_weight = 1.0
+        torque_error_weight   = 1.0
+        completion_reward     = 1000
+        velocity_penalty      = 1.0
+
         # Calculate the squared error between desired and current state
-        position_error =  (self.desired_state[0] - self.state[0]) ** 2
+        # position_error = (self.desired_state[0] - self.state[0]) ** 2
+        position_error = (self.desired_state[0] - self.state[0]) + np.pi  % (2 * np.pi) - np.pi # ensure the position values loop around -pi and pi
         velocity_error = self.state[1] ** 2 + self.state[3] ** 2
         torque_error   =  (self.desired_state[1] - self.system.K_s * (self.state[2] - self.state[0]))**2
         state_error = 500.0 * position_error + velocity_error + 50.0 * torque_error
         # Penalize large motor torque (encourage energy efficiency)
         torque_penalty = 50.0 * (torque ** 2)
+        torque_penalty = torque_penalty[0] # for some reason the torque_penalty results in a np.array() of size 1
         torque_violation_penalty = 1000000.0 * max(0, abs(self.system.K_s * (self.state[2] - self.state[0])) - 350)
         squared_error = state_error ** 2
         mse = np.mean(squared_error)
@@ -124,13 +135,30 @@ class SingleSEAEnv(gym.Env):
         # Negative of mean squared error to minimize it, minus a small time penalty
         time_penalty = 1000.0  # Adjust the time penalty coefficient as needed
         # reward = -1000.0*position_error - time_penalty * self.time_elapsed
-        reward = -100.0*position_error - 1.0*velocity_error - 10.0 * torque_error - torque_penalty - torque_violation_penalty
-        # reward = -100000.0*position_error 
+        # reward = - ( position_error_weight*position_error + velocity_error_weight*velocity_error + torque_error_weight*torque_error) # - torque_penalty #- torque_violation_penalty
+        # reward = reward[0]
+        # reward = -position_error_weight*position_error
+
+        # this reward scheme is based on positive motion rewards
+        position_error = abs((self.desired_state[0] - self.state[2] + math.pi) % (2 * math.pi) - math.pi) ** 2  # desired position - joint motor
+        velocity_error = abs(self.state[1] - (self.state[3]-self.state[1])) # motor velocity - (joint velocity - motor velocity) = motor velocity - spring velocity -> goal is zero velocity
+        torque_error   = abs(self.desired_state[1] - self.system.K_s * (self.state[2] - self.state[0])) # desired torque - K * delta(x)
+        extra_penalty = 0.0
+
+        if (self.state[1] > 10.0):
+            extra_penalty += 0.5 * (self.state[1] - (self.state[3]-self.state[1])) ** 2
+        if (abs(torque) > 300):
+            extra_penalty += 0.5 * (torque) ** 2
+
+        # position_change = position_error - self.previous_state_error[0]
+        # velocity_change = velocity_error - self.previous_state_error[1]
+        # torque_change = torque_error - self.previous_state_error[2]
+        reward = - (position_error_weight*position_error + velocity_error_weight*velocity_error + torque_error_weight*torque_error) - extra_penalty - velocity_penalty * self.state[1]
 
         # Check if the mean squared error is below the threshold
         done = position_error <= self.mse_threshold
         if done:
-            reward = 2e10
+            reward += completion_reward
         # Additional info (optional)
         info = {
             'mse': mse,
@@ -141,11 +169,14 @@ class SingleSEAEnv(gym.Env):
 
         RL_state = np.concatenate((self.state, self.desired_state), axis=0)
 
+        self.previous_state_error = [position_error, velocity_error, torque_error]
+
         return RL_state.copy(), reward, done, info
 
     def reset(self):
         # Reset state and time
         self.state = np.array([0.0, 0.0, 0.0, 0.0])
+        self.previous_state_error = np.array([0.0, 0.0, 0.0])
         self.time_elapsed = 0.0
         # self.F = np.random.uniform(0.0, 100.0)  # Force between 0 and 100 N
         # self.alpha = np.random.uniform(-np.pi, np.pi)  # Direction between -π and π radians

@@ -88,10 +88,9 @@ class SingleSEA:
             theta_s_err = self.K2 * ((x_des[2] - x_des[0]) - (x[2] - x[0]))
             omega_s_err = self.B2 * ((x_des[3] - x_des[1]) - (x[3] - x[1]))
             m_tau += theta_m_err + omega_m_err + theta_s_err + omega_s_err
-        return self.clamp(m_tau, -self.max_torque, self.max_torque)
+        return self.clamp(m_tau, -self.max_torque, self.max_torque) # the clamp function returns a vector
     
     def clamp(self, value, min_value, max_value):
+        if isinstance(value, (list, np.ndarray)):
+            value = value[0]
         return max(min_value, min(value, max_value))
-
-
-
