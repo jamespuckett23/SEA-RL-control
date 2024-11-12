@@ -30,7 +30,7 @@ class SingleSEA:
                            [         0.0,          0.0], 
                            [         0.0, 1.0/self.J_j]]) 
         
-        self.max_torque = 350.0
+        self.max_torque = 100.0
         self.ff_tau = 0.0
         self.use_gains = True
 
@@ -51,7 +51,6 @@ class SingleSEA:
         # External torque due to force F applied at angle alpha
         theta_j = x[2]
         tau_ext = self.F * self.link_length * np.sin(self.alpha - theta_j)
-
         u = np.array([tau_m, tau_ext])
 
         dxdt = np.dot(self.A, x.T) + np.dot(self.B, u.T)

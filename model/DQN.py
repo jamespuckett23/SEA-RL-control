@@ -51,14 +51,17 @@ class DQN(AbstractSolver):
             str(self) + " cannot handle non-discrete action spaces"
         )
         super().__init__(env, eval_env, options)
+        # Check if a GPU is available and set the device accordingly
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
         # Create Q-network
         self.model = QFunction(
             env.observation_space.shape[0],
             env.action_space.n,
             self.options.layers,
-        )
+        ).to(self.device)
         # Create target Q-network
-        self.target_model = deepcopy(self.model)
+        self.target_model = deepcopy(self.model).to(self.device)
 
         if model_path:
             print(f"Loading model from {model_path}")
@@ -108,7 +111,7 @@ class DQN(AbstractSolver):
         #   YOUR IMPLEMENTATION HERE   #
         ################################
         probs = np.zeros(self.env.action_space.n)
-        state_tensor = torch.as_tensor(state, dtype=torch.float32)
+        state_tensor = torch.as_tensor(state, dtype=torch.float32).to(self.device)
         values = self.model(state_tensor)
         best_action = torch.argmax(values)
         epsilon = self.options.epsilon
@@ -138,12 +141,12 @@ class DQN(AbstractSolver):
             if dones[j]:
                 q[j] = rewards[j]
             else:
-                state_tensor = torch.as_tensor(next_states[j])
+                state_tensor = torch.as_tensor(next_states[j], dtype=torch.float32).to(self.device)
                 values = self.target_model(state_tensor)
                 best_action = torch.argmax(values)
                 q_hat = gamma * values[best_action]
                 q[j] = rewards[j] + q_hat
-        return torch.as_tensor(q)
+        return torch.as_tensor(q).to(self.device)
 
 
 
@@ -160,19 +163,19 @@ class DQN(AbstractSolver):
             minibatch = [
                 np.array(
                     [
-                        transition[idx]
-                        for transition, idx in zip(minibatch, [i] * len(minibatch))
+                         transition[idx].cpu().numpy() if isinstance(transition[idx], torch.Tensor) else transition[idx]
+                    for transition, idx in zip(minibatch, [i] * len(minibatch))
                     ]
                 )
                 for i in range(5)
             ]
             states, actions, rewards, next_states, dones = minibatch
             # Convert numpy arrays to torch tensors
-            states = torch.as_tensor(states, dtype=torch.float32)
-            actions = torch.as_tensor(actions, dtype=torch.float32)
-            rewards = torch.as_tensor(rewards, dtype=torch.float32)
-            next_states = torch.as_tensor(next_states, dtype=torch.float32)
-            dones = torch.as_tensor(dones, dtype=torch.float32)
+            states = torch.as_tensor(states, dtype=torch.float32).to(self.device)
+            actions = torch.as_tensor(actions, dtype=torch.float32).to(self.device)
+            rewards = torch.as_tensor(rewards, dtype=torch.float32).to(self.device)
+            next_states = torch.as_tensor(next_states, dtype=torch.float32).to(self.device)
+            dones = torch.as_tensor(dones, dtype=torch.float32).to(self.device)
 
             # Current Q-values
             current_q = self.model(states)
@@ -214,7 +217,7 @@ class DQN(AbstractSolver):
         """
 
         # Reset the environment
-        state = self.env.reset()
+        state = torch.as_tensor(self.env.reset(), dtype=torch.float32).to(self.device)
         reward = 0.0
         print(state)
 
@@ -227,6 +230,9 @@ class DQN(AbstractSolver):
             action = np.random.choice(np.arange(len(probs)), p=probs)
             next_state, reward, done, _ = self.step(action)
 
+            next_state = torch.as_tensor(next_state, dtype=torch.float32).to(self.device)
+            reward = torch.as_tensor(reward, dtype=torch.float32).to(self.device)
+
             self.memorize(state, action, reward, next_state, done)
 
             self.replay()
@@ -238,6 +244,7 @@ class DQN(AbstractSolver):
             
             if self.n_steps % self.options.update_target_estimator_every == 0:
                 self.update_target_model()
+        self.decay_epsilon()
         if self.counter % 10 == 0:
             torch.save(self.model.state_dict(), f"model_episode_{self.counter}.pth")
             print(f"Model saved for episode {self.counter}")
@@ -267,3 +274,11 @@ class DQN(AbstractSolver):
             return torch.argmax(q_values).detach().numpy()
 
         return policy_fn
+    def decay_epsilon(self):
+        """
+        Decays epsilon after each episode.
+        """
+        self.options.epsilon = max(
+            self.options.epsilon_min,
+            self.options.epsilon * self.options.epsilon_decay
+    )

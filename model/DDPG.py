@@ -1,147 +1,283 @@
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
+# Licensing Information:  You are free to use or extend this codebase for
+# educational purposes provided that (1) you do not distribute or publish
+# solutions, (2) you retain this notice, and (3) inform Guni Sharon at 
+# guni@tamu.edu regarding your usage (relevant statistics is reported to NSF).
+# The development of this assignment was supported by NSF (IIS-2238979).
+# Contributors:
+# The core code base was developed by Guni Sharon (guni@tamu.edu).
+# The PyTorch code was developed by Sheelabhadra Dey (sheelabhadra@tamu.edu).
+
 import random
+from copy import deepcopy
 from collections import deque
 
-# Hyperparameters
-GAMMA = 0.99  # Discount factor
-TAU = 0.005   # Soft update parameter
-LR_ACTOR = 1e-4  # Learning rate for actor
-LR_CRITIC = 1e-3  # Learning rate for critic
-BUFFER_SIZE = int(1e6)  # Replay buffer size
-BATCH_SIZE = 64  # Batch size for replay buffer
-ACTION_LIMIT = np.pi  # Actions are bounded between -π and π
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 
-# Actor network
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, action_limit):
-        super(Actor, self).__init__()
-        self.action_limit = action_limit
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, action_dim)
-        self.relu = nn.ReLU()
-        self.tanh = nn.Tanh()
-    
-    def forward(self, state):
-        x = self.relu(self.fc1(state))
-        x = self.relu(self.fc2(x))
-        action = self.tanh(self.fc3(x)) * self.action_limit
-        return action
+from torch.optim import Adam
+from torch.distributions.normal import Normal
 
-# Critic network
-class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
-        self.relu = nn.ReLU()
+from Abstract_Solver import AbstractSolver
 
-    def forward(self, state, action):
-        x = torch.cat([state, action], dim=1)
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        q_value = self.fc3(x)
-        return q_value
 
-# Replay buffer
-class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size):
-        self.buffer = deque(maxlen=buffer_size)
-        self.batch_size = batch_size
-    
-    def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-    
-    def sample(self):
-        batch = random.sample(self.buffer, self.batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
-        return (
-            torch.FloatTensor(states),
-            torch.FloatTensor(actions),
-            torch.FloatTensor(rewards).unsqueeze(1),
-            torch.FloatTensor(next_states),
-            torch.FloatTensor(dones).unsqueeze(1)
+class QNetwork(nn.Module):
+    def __init__(self, obs_dim, act_dim, hidden_sizes):
+        super().__init__()
+        sizes = [obs_dim + act_dim] + hidden_sizes + [1]
+        self.layers = nn.ModuleList()
+        for i in range(len(sizes) - 1):
+            self.layers.append(nn.Linear(sizes[i], sizes[i + 1]))
+
+    def forward(self, obs, act):
+        x = torch.cat([obs, act], dim=-1)
+        for i in range(len(self.layers) - 1):
+            x = F.relu(self.layers[i](x))
+        return self.layers[-1](x).squeeze(dim=-1)
+
+
+class PolicyNetwork(nn.Module):
+    def __init__(self, obs_dim, act_dim, act_lim, hidden_sizes):
+        super().__init__()
+        sizes = [obs_dim] + hidden_sizes + [act_dim]
+        self.act_lim = act_lim
+        self.layers = nn.ModuleList()
+        for i in range(len(sizes) - 1):
+            self.layers.append(nn.Linear(sizes[i], sizes[i + 1]))
+
+    def forward(self, obs):
+        x = torch.cat([obs], dim=-1)
+        for i in range(len(self.layers) - 1):
+            x = F.relu(self.layers[i](x))
+        return self.act_lim * F.tanh(self.layers[-1](x))
+
+
+class ActorCriticNetwork(nn.Module):
+    def __init__(self, obs_dim, act_dim, act_lim, hidden_sizes):
+        super().__init__()
+        self.q = QNetwork(obs_dim, act_dim, hidden_sizes)
+        self.pi = PolicyNetwork(obs_dim, act_dim, act_lim, hidden_sizes)
+
+
+class DDPG(AbstractSolver):
+    def __init__(self, env, eval_env, options):
+        super().__init__(env, eval_env, options)
+        # Create actor-critic network
+        self.actor_critic = ActorCriticNetwork(
+            env.observation_space.shape[0],
+            env.action_space.shape[0],
+            env.action_space.high[0],
+            self.options.layers,
         )
-    
-    def __len__(self):
-        return len(self.buffer)
+        # Create target actor-critic network
+        self.target_actor_critic = deepcopy(self.actor_critic)
 
-# DDPG agent
-class DDPGAgent:
-    def __init__(self, state_dim, action_dim, action_limit):
-        self.actor = Actor(state_dim, action_dim, action_limit)
-        self.actor_target = Actor(state_dim, action_dim, action_limit)
-        self.critic = Critic(state_dim, action_dim)
-        self.critic_target = Critic(state_dim, action_dim)
-        
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LR_ACTOR)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR_CRITIC)
-        
-        self.replay_buffer = ReplayBuffer(BUFFER_SIZE, BATCH_SIZE)
-        self.noise = OUNoise(action_dim)
-        
-        self.soft_update(self.actor_target, self.actor, 1.0)
-        self.soft_update(self.critic_target, self.critic, 1.0)
-    
-    def act(self, state, noise_scale=0.1):
-        state = torch.FloatTensor(state).unsqueeze(0)
-        action = self.actor(state).detach().numpy()[0]
-        action += self.noise.sample() * noise_scale  # Adding noise for exploration
-        return np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
-    
-    def step(self, state, action, reward, next_state, done):
-        self.replay_buffer.add(state, action, reward, next_state, done)
-        
-        if len(self.replay_buffer) > BATCH_SIZE:
-            self.learn()
-    
-    def learn(self):
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample()
-        
-        # Update Critic
-        next_actions = self.actor_target(next_states)
-        next_q_values = self.critic_target(next_states, next_actions)
-        q_targets = rewards + GAMMA * next_q_values * (1 - dones)
-        q_values = self.critic(states, actions)
-        critic_loss = nn.MSELoss()(q_values, q_targets.detach())
-        
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
-        
-        # Update Actor
-        actor_loss = -self.critic(states, self.actor(states)).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
-        
-        # Soft update target networks
-        self.soft_update(self.actor_target, self.actor, TAU)
-        self.soft_update(self.critic_target, self.critic, TAU)
-    
-    def soft_update(self, target, source, tau):
-        for target_param, param in zip(target.parameters(), source.parameters()):
-            target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+        self.policy = self.create_greedy_policy()
 
-# Ornstein-Uhlenbeck noise for exploration
-class OUNoise:
-    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
-        self.action_dim = action_dim
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.reset()
-    
-    def reset(self):
-        self.state = np.ones(self.action_dim) * self.mu
-    
-    def sample(self):
-        x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
-        self.state = x + dx
-        return self.state
+        self.optimizer_q = Adam(self.actor_critic.q.parameters(), lr=self.options.alpha)
+        self.optimizer_pi = Adam(
+            self.actor_critic.pi.parameters(), lr=self.options.alpha
+        )
+
+        # Freeze target actor critic network parameters
+        for param in self.target_actor_critic.parameters():
+            param.requires_grad = False
+
+        # Replay buffer
+        self.replay_memory = deque(maxlen=options.replay_memory_size)
+
+    @torch.no_grad()
+    def update_target_networks(self, tau=0.995):
+        """
+        Copy params from actor_critic to target_actor_critic using Polyak averaging.
+        """
+        for param, param_targ in zip(
+            self.actor_critic.parameters(), self.target_actor_critic.parameters()
+        ):
+            param_targ.data.mul_(tau)
+            param_targ.data.add_((1 - tau) * param.data)
+
+    def create_greedy_policy(self):
+        """
+        Creates a greedy policy.
+
+        Returns:
+            A function that takes an observation as input and returns a vector
+            of action probabilities.
+        """
+
+        @torch.no_grad()
+        def policy_fn(state):
+            state = torch.as_tensor(state, dtype=torch.float32)
+            return self.actor_critic.pi(state).numpy()
+
+        return policy_fn
+
+    @torch.no_grad()
+    def select_action(self, state):
+        """
+        Selects an action given state.
+
+         Returns:
+            The selected action (as an int)
+        """
+        state = torch.as_tensor(state, dtype=torch.float32)
+        mu = self.actor_critic.pi(state)
+        m = Normal(
+            torch.zeros(self.env.action_space.shape[0]),
+            torch.ones(self.env.action_space.shape[0]),
+        )
+        noise_scale = 0.1
+        action_limit = self.env.action_space.high[0]
+        action = mu + noise_scale * m.sample()
+        return torch.clip(
+            action,
+            -action_limit,
+            action_limit,
+        ).numpy()
+
+    @torch.no_grad()
+    def compute_target_values(self, next_states, rewards, dones):
+        """
+        Computes the target q values.
+
+        Use:
+            self.target_actor_critic.pi(states): Returns the greedy action at states.
+            self.target_actor_critic.q(states, actions): Returns the Q-values 
+                for (states, actions).
+
+        Returns:
+            The target q value (as a tensor).
+        """
+        ################################
+        #   YOUR IMPLEMENTATION HERE   #
+        ################################
+        actions = self.target_actor_critic.pi(next_states)
+        q_values = self.target_actor_critic.q(next_states, actions)
+        target = rewards + self.options.gamma * (1 - dones) * q_values
+        return target
+
+    def replay(self):
+        """
+        Samples transitions from the replay memory and updates actor_critic network.
+        """
+        if len(self.replay_memory) > self.options.batch_size:
+            minibatch = random.sample(self.replay_memory, self.options.batch_size)
+            minibatch = [
+                np.array(
+                    [
+                        transition[idx]
+                        for transition, idx in zip(minibatch, [i] * len(minibatch))
+                    ]
+                )
+                for i in range(5)
+            ]
+            states, actions, rewards, next_states, dones = minibatch
+            # Convert numpy arrays to torch tensors
+            states = torch.as_tensor(states, dtype=torch.float32)
+            actions = torch.as_tensor(actions, dtype=torch.float32)
+            rewards = torch.as_tensor(rewards, dtype=torch.float32)
+            next_states = torch.as_tensor(next_states, dtype=torch.float32)
+            dones = torch.as_tensor(dones, dtype=torch.float32)
+
+            # Current Q-values
+            current_q = self.actor_critic.q(states, actions)
+            # Target Q-values
+            target_q = self.compute_target_values(next_states, rewards, dones)
+
+            # Optimize critic network
+            loss_q = self.q_loss(current_q, target_q).mean()
+            self.optimizer_q.zero_grad()
+            loss_q.backward()
+            self.optimizer_q.step()
+
+            # Optimize actor network
+            loss_pi = self.pi_loss(states).mean()
+            self.optimizer_pi.zero_grad()
+            loss_pi.backward()
+            self.optimizer_pi.step()
+
+    def memorize(self, state, action, reward, next_state, done):
+        """
+        Adds transitions to the replay buffer.
+        """
+        self.replay_memory.append((state, action, reward, next_state, done))
+
+    def train_episode(self):
+        """
+        Runs a single episode of the DDPG algorithm.
+
+        Use:
+            self.select_action(state): Sample an action from the policy.
+            self.step(action): Performs an action in the env.
+            self.memorize(state, action, reward, next_state, done): store the transition in
+                the replay buffer.
+            self.replay(): Sample transitions and update actor_critic.
+            self.update_target_networks(): Update target_actor_critic using Polyak averaging.
+        """
+        reward = 0
+        state, _ = self.env.reset()
+        print(state)
+        for i in range(self.options.steps):
+            ################################
+            #   YOUR IMPLEMENTATION HERE   #
+            ################################
+            action = self.select_action(state)
+            next_state, reward, done, _ = self.step(action)
+            self.memorize(state, action, reward, next_state, done)
+            if done:
+                break
+            self.replay()
+            self.update_target_networks()
+            state = next_state
+        print("Exited with reward: ", reward, "  Number of steps: ", i)
+        return reward
+
+    def q_loss(self, current_q, target_q):
+        """
+        The q loss function.
+
+        args:
+            current_q: Current Q-values.
+            target_q: Target Q-values.
+
+        Returns:
+            The unreduced loss (as a tensor).
+        """
+        ################################
+        #   YOUR IMPLEMENTATION HERE   #
+        ################################
+        return_val = (current_q - target_q) ** 2 
+        return return_val
+    def pi_loss(self, states):
+        """
+        The policy gradient loss function.
+        Note that you are required to define the Loss^PG
+        which should be the integral of the policy gradient
+        The "returns" is the one-hot encoded (return - baseline) value for each action a_t
+        ('0' for unchosen actions).
+
+        args:
+            states:
+
+        Use:
+            self.actor_critic.pi(states): Returns the greedy action at states.
+            self.actor_critic.q(states, actions): Returns the Q-values for (states, actions).
+
+        Returns:
+            The unreduced loss (as a tensor).
+        """
+        ################################
+        #   YOUR IMPLEMENTATION HERE   #
+        ################################
+        actions = self.actor_critic.pi(states)
+        q_values = self.actor_critic.q(states, actions)
+        return -q_values
+
+
+    def __str__(self):
+        return "DDPG"
+
+    def plot(self, stats, smoothing_window=20, final=False):
+        plotting.plot_episode_stats(stats, smoothing_window, final=final)
