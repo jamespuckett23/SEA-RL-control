@@ -105,7 +105,7 @@ def main():
             torch.save(agent.target_actor_critic.state_dict(), "target_actor_6000_from_good_version.pth")
         
         update_plot(episode + 1, rewards, smoothed_rewards)
-        if len(rewards) > smoothing_window and smoothed_rewards[-1] > 5000:
+        if len(rewards) > smoothing_window and smoothed_rewards[-1] > 6000:
             break
 
     # Keep the plot open after training
