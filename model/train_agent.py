@@ -3,27 +3,51 @@
 import gym
 import numpy as np
 from single_sea_env import SingleSEAEnv
-from DDPG import DDPG  # Replace 'your_module_name' with the actual module name
+from DDPG import DDPG
 import matplotlib.pyplot as plt
 import pickle
 import torch
+import threading
+from pynput import keyboard  # Use pynput for key detection
 
+# Global variable to toggle visualization
+visualization_enabled = False
+
+def toggle_visualization(env):
+    """Toggles visualization dynamically based on user input (press 'v' to toggle)."""
+    def on_press(key):
+        global visualization_enabled
+        try:
+            if key.char == 'v':  # Press 'v' to toggle visualization
+                visualization_enabled = not visualization_enabled
+                env.visualize = visualization_enabled  # Update environment visualization flag
+                print(f"Visualization {'enabled' if visualization_enabled else 'disabled'}")
+        except AttributeError:
+            pass  # Handle special keys that don't have a char attribute
+
+    # Listen for key presses
+    with keyboard.Listener(on_press=on_press) as listener:
+        listener.join()  # Keeps the listener running
 
 def main():
-    
-    # Create the environment
-    env = SingleSEAEnv(visualize=False, mse_threshold=0.01)
+    global visualization_enabled
+
+    # Create the environment with visualization initially off
+    env = SingleSEAEnv(visualize=visualization_enabled, mse_threshold=0.01)
     eval_env = None  # If you have a separate evaluation environment
+
+    # Start a separate thread to listen for visualization toggle key
+    threading.Thread(target=toggle_visualization, args=(env,), daemon=True).start()
 
     # Define options with necessary parameters
     class Options:
         def __init__(self):
             self.gamma = 0.99        # Discount factor
-            self.alpha = 0.001         # Learning rate
+            self.alpha = 0.001       # Learning rate
             self.epsilon = 0.5       # Starting epsilon for exploration
-            self.epsilon_min = 0.01    # Minimum epsilon
-            self.epsilon_decay = 0.999 # Decay rate for epsilon            self.num_episodes = 5000 # Number of episodes to train
-            self.num_episodes = 10000 # Number of episodes to train
+            self.epsilon_min = 0.01  # Minimum epsilon
+            self.epsilon_decay = 0.999 # Decay rate for epsilon
+            self.num_episodes = 5000 # Number of episodes to train
             self.steps = 1000        # Maximum steps per episode
             self.layers = [128, 128, 64]
             self.replay_memory_size = 500000
@@ -32,15 +56,14 @@ def main():
 
     options = Options()
 
-    # Create an instance of ApproxQLearning
+    # Create an instance of DDPG
     agent = DDPG(env, eval_env, options)
-    agent.actor_critic.load_state_dict(torch.load("actor_critic_test_5000.pth"))
-    agent.target_actor_critic.load_state_dict(torch.load("target_actor_test_5000.pth"))
+    agent.actor_critic.load_state_dict(torch.load("actor_critic_5000_from_good_version.pth"))
+    agent.target_actor_critic.load_state_dict(torch.load("target_actor_5000_from_good_version.pth"))
 
-    rewards =[]
-
+    rewards = []
     smoothed_rewards = []  # To store smoothed rewards
-    smoothing_window = 100  # Window size for moving average
+    smoothing_window = 200  # Window size for moving average
 
     # Set up dynamic plot
     plt.ion()  # Turn on interactive mode
@@ -78,16 +101,16 @@ def main():
 
         # Optionally, print progress
         if (episode + 1) % 10 == 0:
-            print(f"Episode {episode + 1} completed.")
-            torch.save(agent.actor_critic.state_dict(), "actor_critic_no_done_10000.pth")
-            torch.save(agent.target_actor_critic.state_dict(), "target_actor_no_done_10000.pth")
-            print(f"Model saved at episode {episode}")
+            torch.save(agent.actor_critic.state_dict(), "actor_critic_6000_from_good_version.pth")
+            torch.save(agent.target_actor_critic.state_dict(), "target_actor_6000_from_good_version.pth")
         
         update_plot(episode + 1, rewards, smoothed_rewards)
+        if len(rewards) > smoothing_window and smoothed_rewards[-1] > 5000:
+            break
 
-        # Keep the plot open after training
+    # Keep the plot open after training
     plt.ioff()
-    plt.savefig('rewards over episodes.png')  # Save the final plot
+    plt.savefig('rewards_over_episodes.png')  # Save the final plot
     plt.show()
 
     env.close()

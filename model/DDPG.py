@@ -59,7 +59,6 @@ class ActorCriticNetwork(nn.Module):
         self.q = QNetwork(obs_dim, act_dim, hidden_sizes)
         self.pi = PolicyNetwork(obs_dim, act_dim, act_lim, hidden_sizes)
 
-
 class DDPG(AbstractSolver):
     def __init__(self, env, eval_env, options):
         super().__init__(env, eval_env, options)
@@ -86,6 +85,7 @@ class DDPG(AbstractSolver):
 
         # Replay buffer
         self.replay_memory = deque(maxlen=options.replay_memory_size)
+        self.noise = OUNoise(env.action_space.shape[0], theta=0.15, sigma=0.2)
 
     @torch.no_grad()
     def update_target_networks(self, tau=0.995):
@@ -124,13 +124,9 @@ class DDPG(AbstractSolver):
         """
         state = torch.as_tensor(state, dtype=torch.float32)
         mu = self.actor_critic.pi(state)
-        m = Normal(
-            torch.zeros(self.env.action_space.shape[0]),
-            torch.ones(self.env.action_space.shape[0]),
-        )
-        noise_scale = 0.1
+        noise = self.noise.sample()  # Add OU noise
+        action = mu + noise
         action_limit = self.env.action_space.high[0]
-        action = mu + noise_scale * m.sample()
         return torch.clip(
             action,
             -action_limit,
@@ -216,6 +212,7 @@ class DDPG(AbstractSolver):
             self.replay(): Sample transitions and update actor_critic.
             self.update_target_networks(): Update target_actor_critic using Polyak averaging.
         """
+        self.noise.reset()  # Reset OU noise for each episode
         reward = 0
         state, _ = self.env.reset()
         print(state)
@@ -281,3 +278,18 @@ class DDPG(AbstractSolver):
 
     def plot(self, stats, smoothing_window=20, final=False):
         plotting.plot_episode_stats(stats, smoothing_window, final=final)
+class OUNoise:
+    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
+        self.action_dim = action_dim
+        self.mu = mu
+        self.theta = theta
+        self.sigma = sigma
+        self.reset()
+
+    def reset(self):
+        self.state = np.ones(self.action_dim) * self.mu
+
+    def sample(self):
+        dx = self.theta * (self.mu - self.state) + self.sigma * np.random.randn(self.action_dim)
+        self.state += dx
+        return self.state

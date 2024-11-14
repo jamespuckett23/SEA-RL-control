@@ -13,11 +13,12 @@ def main():
     # Simulation parameters
     t_start = 0.0
     t_end = 100.0
-    dt = 0.001
-    t = np.arange(t_start, t_end + dt, dt)
+
 
     # Load trained AI model
-    env = SingleSEAEnv(visualize=False, mse_threshold=0.01)
+    env = SingleSEAEnv(visualize=True, mse_threshold=0.01)
+    dt = env.dt
+    t = np.arange(t_start, t_end + dt, dt)
     # Define options with necessary parameters
     class Options:
         def __init__(self):
@@ -35,8 +36,8 @@ def main():
 
     options = Options()
     actor_model = DDPG(env, None, options)
-    actor_model.actor_critic.load_state_dict(torch.load("actor_critic_test_5000.pth"))
-    actor_model.target_actor_critic.load_state_dict(torch.load("target_actor_test_5000.pth"))
+    actor_model.actor_critic.load_state_dict(torch.load("actor_critic_5000_from_good_version.pth"))
+    actor_model.target_actor_critic.load_state_dict(torch.load("target_actor_5000_from_good_version.pth"))
     # Single SEA parameters
     params = {
         'J_m': 0.44,
@@ -122,6 +123,8 @@ def main():
         nonlocal state, t_prev
 
         t_curr = t[frame]
+        env.F = disturbance_magnitude
+        env.alpha = disturbance_direction
         env.system.set_external_force(disturbance_magnitude, disturbance_direction)
 
         # Update desired torque based on the slider values
@@ -131,10 +134,9 @@ def main():
         state[4:] = [desired_position, torque_desired]
 
         # AI-based torque action
-        with torch.no_grad():
-            state_tensor = torch.tensor(state, dtype=torch.float32)
-            torque_action = actor_model.select_action(state_tensor)
-            next_state, _, _, _ = actor_model.step(torque_action)
+        state_tensor = torch.tensor(state, dtype=torch.float32)
+        torque_action = actor_model.select_action(state_tensor)
+        next_state, _, _, _ = actor_model.step(torque_action)
 
         env.system.set_ff_tau(torque_action[0])
         state = next_state
@@ -161,6 +163,7 @@ def main():
         return line_j, line_m, disturbance_arrow, time_text
 
     ani = animation.FuncAnimation(fig, update, frames=len(t), init_func=init, interval=dt, blit=False, repeat=False)
+    ani.save('sea_simulation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
     plt.show()
 
 if __name__ == '__main__':

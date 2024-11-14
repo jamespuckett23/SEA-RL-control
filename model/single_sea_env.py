@@ -47,16 +47,20 @@ class SingleSEAEnv(gym.Env):
 
         # Initial state
         self.state = np.array(self.observation_space.sample()[:4])
+        self.state[2] = self.state[0]
+        self.state[1] = 0.0
+        self.state[3] = self.state[1]
 
         # Time parameters
         self.dt = 0.005  # Time step
         self.time_elapsed = 0.0
         self.previous_position_error = 0
+        self.time_in_zone = 0
+        self.base_position = np.array([0, 0])  # Default base position
 
         # Visualization flag
         self.visualize = visualize
-        if self.visualize:
-            self._setup_visualization()
+        self._setup_visualization()
 
         # Placeholder for desired state (will be set in reset)
         self.desired_state = np.array([0.0, 0.0])
@@ -65,7 +69,7 @@ class SingleSEAEnv(gym.Env):
         self.mse_threshold = mse_threshold
 
         self.counter = 0.0
-        self.F = np.random.uniform(0.0, 100.0)  # Force between 0 and 100 N
+        self.F = np.random.uniform(0.0, 80.0)  # Force between 0 and 100 N
         self.alpha = np.random.uniform(-np.pi, np.pi)  # Direction between -π and π radians
 
         self.L = np.array([20.0, 0.2, 50.0, 0.5])
@@ -108,21 +112,52 @@ class SingleSEAEnv(gym.Env):
             self.render(self.F, self.alpha)
 
         # Calculate the squared error between desired and current state
-        position_error =  (self.desired_state[0] - self.state[0]) ** 2
-        velocity_error = self.state[1] ** 2 + self.state[3] ** 2
-        torque_error   =  (self.desired_state[1] - self.system.K_s * (self.state[2] - self.state[0]))**2
+        position_error =  abs((self.desired_state[0] - self.state[0])) / 6.28
+        velocity_error = (abs(self.state[1]) + abs(self.state[3])) / 20.0
+        torque_error   =  abs((self.desired_state[1] - self.system.K_s * (self.state[2] - self.state[0])))/200.0
         # Penalize large motor torque (encourage energy efficiency)
-        torque_penalty =  (torque ** 2)
-        torque_violation_penalty =  max(0, abs(self.system.K_s * (self.state[2] - self.state[0])) - 100)
+        torque_penalty =  abs(torque) / 100.0
+        torque_violation_penalty =  max(0, abs(self.system.K_s * (self.state[2] - self.state[0])) - 150)
+        time_penalty = self.time_elapsed
 
         # Reward function
-        # Negative of mean squared error to minimize it, minus a small time penalty
-        time_penalty = 200.0  # Adjust the time penalty coefficient as needed
-        # reward = -1000.0*position_error - time_penalty * self.time_elapsed
-        reward = -50.0*position_error - 0.001 * velocity_error - 0.001 * torque_error - 0.0001 * torque_penalty - 10.0 * torque_violation_penalty - time_penalty * self.time_elapsed
-        # reward = -100000.0*position_error 
+        reward = -10000.0*position_error - 25.0*torque_penalty - 10.0*time_penalty - 10.0*velocity_error - 2.0*torque_error 
 
-        done = False
+        if position_error < 0.1:
+            reward += 50.0
+
+        if position_error < 0.01:
+            reward += 100.0
+
+        if position_error < 0.005:
+            reward += 400.0
+        
+        if position_error < 0.005:
+            self.time_in_zone += 1
+        else:
+            self.time_in_zone = 0
+        if self.time_in_zone > 1:
+            reward += 100 * self.time_in_zone
+
+        if position_error > 0.8:
+            reward -= 1000.0  # Soft penalty near violation
+
+        if max(0, abs(self.system.K_s * (self.state[2] - self.state[0])) - 100) > 0:
+            reward -= 1000.0
+
+        if self.time_in_zone > 50:
+            reward += 2000.0
+            done = True
+        elif position_error > 1.0:
+            reward -= 5000.0
+            print("POSITION VIOLATION")
+            done = True
+        elif torque_violation_penalty > 0:
+            reward -= 5000.0
+            print("TORQUE VIOLATION")
+            done = True
+        else:
+            done = False
         # Additional info (optional)
         info = {
             'time_elapsed': self.time_elapsed,
@@ -136,7 +171,9 @@ class SingleSEAEnv(gym.Env):
 
     def reset(self):
         self.system = SingleSEA(self.params)
-        # Set to use torque commands instead of gains
+        # Set to use torque commands instead of gains        self.state[2] = self.state[0]
+        self.state[1] = 0.0
+        self.state[3] = self.state[1]
         self.system.set_use_gains(False)
         # Reset state and time
         self.state = np.array(self.observation_space.sample()[:4])
@@ -145,7 +182,8 @@ class SingleSEAEnv(gym.Env):
         self.state[3] = self.state[1]
         self.s = self.state.copy()
         self.time_elapsed = 0.0
-        self.F = np.random.uniform(0.0, 100.0)  # Force between 0 and 100 N
+        self.time_in_zone = 0.0
+        self.F = np.random.uniform(0.0, 80.0)  # Force between 0 and 100 N
         self.alpha = np.random.uniform(-np.pi, np.pi)  # Direction between -π and π radians
         # self.F = 0.0  # Force between 0 and 100 N
         # self.alpha = 0.0  # Direction between -π and π radians
