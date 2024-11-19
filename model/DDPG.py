@@ -127,8 +127,8 @@ class DDPGAgent:
     def act(self, state, noise_scale=0.1):
         state = torch.FloatTensor(state).unsqueeze(0)
         action = self.actor(state).detach().numpy()[0]
-        # action += self.noise.sample() * noise_scale  # Adding noise for exploration
-        return action # np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
+        action += self.noise.sample() * noise_scale  # Adding noise for exploration
+        return np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
     
     def step(self, state, action, reward, next_state, done):
         self.replay_buffer.add(state, action, reward, next_state, done)

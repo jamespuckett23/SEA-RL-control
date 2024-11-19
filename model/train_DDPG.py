@@ -40,11 +40,11 @@ rewards = []
 # Training parameters
 num_episodes = 2000
 max_steps = 4000  # Maximum steps per episode
-noise_scale = 0.0  # Initial noise scale
+noise_scale = 0.1  # Initial noise scale
 
 # Load the latest checkpoint if available
-agent, start_episode = load_latest_checkpoint(agent)
-# start_episode = 0
+# agent, start_episode = load_latest_checkpoint(agent)
+start_episode = 0
 
 # Training loop
 for episode in range(start_episode, num_episodes):
