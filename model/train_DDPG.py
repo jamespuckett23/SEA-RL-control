@@ -26,6 +26,12 @@ def load_latest_checkpoint(agent, path="./"):
     
     return agent, start_episode
 
+def compute_moving_average(data, window_size):
+    data = np.array(data).flatten()
+    if len(data) < window_size:
+        return float(np.mean(data))  # If not enough data, just use the mean
+    return float(np.convolve(data, np.ones(window_size)/window_size, mode='valid'))
+
 # Initialize your custom Gym environment
 env = SingleSEAEnv(visualize=False, mse_threshold=0.01)
 state_dim = env.observation_space.shape[0]
@@ -36,9 +42,11 @@ action_limit = env.action_space.high[0]  # Assuming symmetric action bounds
 agent = DDPGAgent(state_dim, action_dim, action_limit)
 
 rewards = []
+smoothed_rewards_plot = []
+smoothed_rewards = []
 
 # Training parameters
-num_episodes = 2000
+num_episodes = 5001
 max_steps = 4000  # Maximum steps per episode
 noise_scale = 0.1  # Initial noise scale
 
@@ -58,12 +66,6 @@ for episode in range(start_episode, num_episodes):
 
         # Step the environment with the selected action
         next_state, reward, done, info = env.step(action)
-        
-        print("state: ", state)
-        print("action (torque): ", action)
-        print("next_state: ", next_state)
-        if done:
-            print("finished")
 
         # Store experience in replay buffer
         agent.step(state, action, reward, next_state, done)
@@ -75,15 +77,19 @@ for episode in range(start_episode, num_episodes):
         # Check if the episode has ended
         if done:
             break
-    
+
     print(f"Episode {episode + 1}/{num_episodes}, Reward: {episode_reward}")
     rewards.append(episode_reward)
-    
+    smoothed_rewards = compute_moving_average(rewards, 200)
+    # if len(smoothed_rewards) > 0:
+    #     smoothed_rewards_plot.append(smoothed_rewards[-1])
+    smoothed_rewards_plot.append(smoothed_rewards)
+
     # Decay noise scale over time for less exploration as training progresses
     noise_scale = max(noise_scale * 0.99, 0.01)  # Gradually reduce noise
 
     # Save model every 100 episodes
-    if episode % 100 == 0 and episode != 0:
+    if episode % 1000 == 0 and episode != 0:
         print("Saving models at episode:", episode)
         with open(f"ddpg_models_episode_{episode}.pkl", "wb") as f:
             pickle.dump(agent, f)  # Save the entire agent
@@ -91,13 +97,13 @@ for episode in range(start_episode, num_episodes):
 # Plotting the rewards
 plt.figure(figsize=(10, 5))
 plt.plot(rewards, label='Episode Reward')
+plt.plot(range(len(rewards)), smoothed_rewards_plot, label='Smoothed Reward', color='red', linewidth=2)
 plt.xlabel('Episode')
-plt.xscale('log')
 plt.ylabel('Reward')
 plt.title('Rewards over Episodes')
 plt.grid(True)
 plt.legend()
-plt.savefig("rewards_plot.png")  # Save the plot as a file
+plt.savefig("rewards_plot.png")
 
 # Close the environment
 env.close()

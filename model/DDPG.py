@@ -19,9 +19,9 @@ class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, action_limit):
         super(Actor, self).__init__()
         self.action_limit = action_limit
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, action_dim)
+        self.fc1 = nn.Linear(state_dim, 3)
+        self.fc2 = nn.Linear(3, 3)
+        self.fc3 = nn.Linear(3, action_dim)
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
     
@@ -35,9 +35,9 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(state_dim + action_dim, 6)
+        self.fc2 = nn.Linear(6, 6)
+        self.fc3 = nn.Linear(6, 1)
         self.relu = nn.ReLU()
 
     def forward(self, state, action):
@@ -78,34 +78,6 @@ class ReplayBuffer:
     
     def __len__(self):
         return len(self.buffer)
-
-# class ReplayBuffer:
-#     def __init__(self, buffer_size, batch_size):
-#         self.buffer = []
-#         self.buffer_size = buffer_size
-
-#     def add(self, state, action, reward, next_state, done):
-#         self.buffer.append((state, action, reward, next_state, done))
-#         if len(self.buffer) > self.buffer_size:
-#             self.buffer.pop(0)
-
-#     def sample(self, batch_size):
-#         samples = random.sample(self.buffer, batch_size)
-#         states, actions, rewards, next_states, dones = zip(*samples)
-        
-#         # Convert them to tensors, ensuring they are in the right format
-#         states = torch.FloatTensor(np.array(states))
-#         actions = torch.FloatTensor(np.array(actions))
-        
-#         # Make sure rewards are simple scalars
-#         rewards = torch.FloatTensor([float(r) for r in rewards]).unsqueeze(1)
-#         next_states = torch.FloatTensor(np.array(next_states))
-#         dones = torch.FloatTensor(np.array(dones)).unsqueeze(1)
-
-#         return states, actions, rewards, next_states, dones
-    
-#     def __len__(self):
-#         return len(self.buffer)
 
 # DDPG agent
 class DDPGAgent:

@@ -1,7 +1,7 @@
 # single_sea_env.py
 
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import math
 import matplotlib.pyplot as plt
@@ -17,7 +17,7 @@ class SingleSEAEnv(gym.Env):
         super(SingleSEAEnv, self).__init__()
 
         # Initialize the SingleSEA system with default parameters
-        self.params = {
+        params = {
             'J_m': 0.44,           # Motor inertia (kg·m²)
             'J_j': 0.29,           # Joint/load inertia (kg·m²)
             'K_s': 1180.0,         # Spring stiffness (N·m/rad)
@@ -27,18 +27,13 @@ class SingleSEAEnv(gym.Env):
             'alpha': 0.0,          # Initial external force direction (rad)
         }
 
-        self.system = SingleSEA(self.params)
+        self.system = SingleSEA(params)
 
-        # Action space: Discrete actions representing torque from -100 to 100 N·m in increments of 1
-        self.action_space = spaces.Box(
-            low=-100.0,
-            high=100.0,
-            dtype=np.float32
-        )
-
+        # Action space: Discrete actions representing torque from -350 to 350 N·m in increments of 1
+        self.action_space = spaces.Box(low=-np.pi, high=np.pi, dtype=np.float32)
 
         # Observation space: [theta_m, omega_m, theta_j, omega_j]
-        high = np.array([np.pi, 5.0, np.pi, 5.0, np.pi, 100.0])
+        high = np.array([np.pi, 20.0, np.pi, 20.0, np.pi, 350.0])
         self.observation_space = spaces.Box(
             low=-high,
             high=high,
@@ -46,31 +41,34 @@ class SingleSEAEnv(gym.Env):
         )
 
         # Initial state
-        self.state = np.array(self.observation_space.sample()[:4])
-        self.state[2] = self.state[0]
-        self.state[1] = 0.0
-        self.state[3] = self.state[1]
+        # State vector: [theta_motor, omega_motor, theta_joint, omega_joint, desired_position, desired_torque]
+        self.state = np.array([0.0, 0.0, 0.0, 0.0])
+
+        # position error, angular velocity error, torque error
+        self.previous_state_error = np.array([0.0, 0.0, 0.0])
 
         # Time parameters
         self.dt = 0.005  # Time step
         self.time_elapsed = 0.0
-        self.previous_position_error = 0
-        self.time_in_zone = 0
-        self.base_position = np.array([0, 0])  # Default base position
 
         # Visualization flag
         self.visualize = visualize
-        self._setup_visualization()
+        if self.visualize:
+            self._setup_visualization()
 
         # Placeholder for desired state (will be set in reset)
+        # desired state: theta position, angular position
         self.desired_state = np.array([0.0, 0.0])
 
         # Mean squared error threshold for episode termination
         self.mse_threshold = mse_threshold
 
         self.counter = 0.0
-        self.F = np.random.uniform(0.0, 80.0)  # Force between 0 and 100 N
+        self.F = np.random.uniform(0.0, 100.0)  # Force between 0 and 100 N
         self.alpha = np.random.uniform(-np.pi, np.pi)  # Direction between -π and π radians
+
+        # Set to use torque commands instead of gains
+        self.system.set_use_gains(False)
 
         self.L = np.array([20.0, 0.2, 50.0, 0.5])
 
@@ -78,12 +76,11 @@ class SingleSEAEnv(gym.Env):
 
     def step(self, action):
         # Map the action index to torque value
-        torque = action[0]  # Torque ranges from -100 to 100 N·m
+        torque = 350/np.pi * action # Torque ranges from -350 to 350 N·m
 
         # Set the torque command
         self.system.set_ff_tau(torque)
-        state_des = [self.desired_state[0], 0.0, self.desired_state[1], 0.0]
-        self.system.set_desired_state(state_des)
+        self.system.set_desired_state(self.desired_state)
 
         self.system.set_external_force(self.F, self.alpha)
 
@@ -105,6 +102,10 @@ class SingleSEAEnv(gym.Env):
         self.s = sol.y[:, -1]
         # Update state
         self.state = self.s
+        # clamp theta values to prevent angle wind up
+        self.state[0] = (self.state[0] + np.pi) % (2 * np.pi) - np.pi  # For theta_m
+        self.state[2] = (self.state[2] + np.pi) % (2 * np.pi) - np.pi  # For theta_j
+
         self.time_elapsed += self.dt
 
         # Optionally render the environment
@@ -170,7 +171,7 @@ class SingleSEAEnv(gym.Env):
         return RL_state.copy(), reward, done, info
 
     def reset(self):
-        self.system = SingleSEA(self.params)
+        # self.system = SingleSEA(self.params)
         # Set to use torque commands instead of gains        self.state[2] = self.state[0]
         self.state[1] = 0.0
         self.state[3] = self.state[1]
@@ -210,7 +211,7 @@ class SingleSEAEnv(gym.Env):
             self._reset_visualization()
         RL_state = np.concatenate((self.state, self.desired_state), axis=0)
 
-        return RL_state.copy(), "none"
+        return RL_state.copy()
 
     def render(self, external_force=0.0, external_alpha=0.0, mode='human'):
         if self.visualize:
