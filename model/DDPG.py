@@ -96,7 +96,7 @@ class DDPGAgent:
         self.soft_update(self.actor_target, self.actor, 1.0)
         self.soft_update(self.critic_target, self.critic, 1.0)
     
-    def act(self, state, noise_scale=0.1):
+    def act(self, state, noise_scale=0.15):
         state = torch.FloatTensor(state).unsqueeze(0)
         action = self.actor(state).detach().numpy()[0]
         action += self.noise.sample() * noise_scale  # Adding noise for exploration

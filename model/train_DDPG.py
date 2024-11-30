@@ -30,7 +30,9 @@ def compute_moving_average(data, window_size):
     data = np.array(data).flatten()
     if len(data) < window_size:
         return float(np.mean(data))  # If not enough data, just use the mean
-    return float(np.convolve(data, np.ones(window_size)/window_size, mode='valid'))
+    
+    moving_average = np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+    return float(moving_average[-1])
 
 # Initialize your custom Gym environment
 env = SingleSEAEnv(visualize=False, mse_threshold=0.01)
@@ -91,7 +93,7 @@ for episode in range(start_episode, num_episodes):
     # Save model every 100 episodes
     if episode % 1000 == 0 and episode != 0:
         print("Saving models at episode:", episode)
-        with open(f"ddpg_models_episode_{episode}.pkl", "wb") as f:
+        with open(f"data/ddpg_models_episode_{episode}_with_adam.pkl", "wb") as f:
             pickle.dump(agent, f)  # Save the entire agent
 
 # Plotting the rewards

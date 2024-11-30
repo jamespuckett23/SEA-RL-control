@@ -114,7 +114,7 @@ class SingleSEAEnv(gym.Env):
 
         # Calculate the squared error between desired and current state
         position_error =  abs((self.desired_state[0] - self.state[0])) / 6.28
-        velocity_error = (abs(self.state[1]) + abs(self.state[3])) / 20.0
+        velocity_error = (abs(self.state[1] - self.state[3])) / 20.0
         torque_error   =  abs((self.desired_state[1] - self.system.K_s * (self.state[2] - self.state[0])))/200.0
         # Penalize large motor torque (encourage energy efficiency)
         torque_penalty =  abs(torque) / 100.0
