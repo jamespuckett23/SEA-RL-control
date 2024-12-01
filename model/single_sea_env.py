@@ -52,7 +52,7 @@ class SingleSEAEnv(gym.Env):
         self.state[3] = self.state[1]
 
         # Time parameters
-        self.dt = 0.005  # Time step
+        self.dt = 0.01  # Time step
         self.time_elapsed = 0.0
         self.previous_position_error = 0
         self.time_in_zone = 0
