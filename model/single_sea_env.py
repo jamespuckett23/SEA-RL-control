@@ -25,6 +25,10 @@ class SingleSEAEnv(gym.Env):
             'link_length': 1.0,    # Length of the link (m)
             'F': 0.0,              # Initial external force magnitude (N)
             'alpha': 0.0,          # Initial external force direction (rad)
+            'K1': 694.8,
+            'B1': 13.87,
+            'K2': -10.0,
+            'B2': -5.0,
         }
 
         self.system = SingleSEA(self.params)
