@@ -6,7 +6,7 @@ from scipy.integrate import solve_ivp
 from single_sea_env import SingleSEAEnv
 from SingleSEA import SingleSEA
 import torch
-from DDPG import DDPG  # Replace 'your_module_name' with the actual module name
+from DDPG import DDPG  
 
 
 def main():
