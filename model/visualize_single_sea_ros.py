@@ -8,9 +8,13 @@ import torch
 from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from single_sea_env import SingleSEAEnv
+from SingleSEA import SingleSEA
+from joint_command_publisher import JointCommandPublisher
+import sys
 
 class SEAControlNode(Node):
-    def __init__(self):
+    def __init__(self, desired_position):
         super().__init__('sea_control_node')
         
         # ROS 2 Subscribers and Publishers
@@ -23,13 +27,19 @@ class SEAControlNode(Node):
         self.publisher = self.create_publisher(Float32, '/desired_torque', 10)
 
         # Initialize parameters
+        self.joint_position = 0.0
+        self.joint_velocity = 0.0
         self.motor_position = 0.0
         self.motor_velocity = 0.0
         self.spring_position = 0.0
         self.spring_velocity = 0.0
         self.spring_stiffness = 200.0  # Nm/rad
-
+        t_start = 0.0
+        t_end = 100.0
         # Load trained AI model
+        env = SingleSEAEnv(visualize=False, mse_threshold=0.01)
+        dt = env.dt
+        t = np.arange(t_start, t_end + dt, dt)
         class Options:
             def __init__(self):
                 self.gamma = 0.99
@@ -45,21 +55,24 @@ class SEAControlNode(Node):
                 self.update_target_estimator_every = 500
 
         options = Options()
-        self.actor_model = DDPG(None, None, options)
+        self.actor_model = DDPG(env, None, options)
         self.actor_model.actor_critic.load_state_dict(torch.load("actor_critic_5000_from_good_version.pth"))
         self.actor_model.target_actor_critic.load_state_dict(torch.load("target_actor_5000_from_good_version.pth"))
 
         # Initial desired state and action
-        self.desired_position = 0.0
+        self.desired_position = desired_position
         self.desired_torque = 0.0
 
         # Setup the visualization
         self.setup_visualization()
+        self.joint_command_publisher = JointCommandPublisher()
+        self.joint_command_publisher.send_request(4, 1)
+        self.joint_command_publisher.pub_current_message([0.0])
 
     def joint_states_callback(self, msg):
         # Extract motor position and velocity from the joint states message
-        self.motor_position = msg.position[0]  # Assuming the motor is the first joint
-        self.motor_velocity = msg.velocity[0]
+        self.joint_position = msg.position[0]  # Assuming the motor is the first joint
+        self.joint_velocity = msg.velocity[0]
 
         # Calculate spring position from the effort (assuming the spring is the second joint)
         spring_effort = msg.effort[0]
@@ -68,17 +81,20 @@ class SEAControlNode(Node):
         # Set spring velocity to zero for simplicity (if not available)
         self.spring_velocity = 0.0
 
+        self.motor_position = self.joint_position + self.spring_position
+        self.motor_velocity = self.joint_velocity + self.spring_velocity
+
         # Update the state for the agent
-        state = np.array([self.motor_position, self.motor_velocity, self.spring_position, self.spring_velocity, self.desired_position, self.desired_torque])
+        state = np.array([self.motor_position, self.motor_velocity, self.joint_position, self.joint_velocity, self.desired_position, self.desired_torque])
         state_tensor = torch.tensor(state, dtype=torch.float32)
         
         # Get action from the agent
         torque_action = self.actor_model.select_action(state_tensor)
         
         # Publish the torque command
-        msg = Float32()
-        msg.data = torque_action[0]
-        self.publisher.publish(msg)
+        current = torque_action.astype(np.float64)
+        current = current[0]/8.0
+        self.joint_command_publisher.pub_current_message([current])
 
         # Update the visualization
         self.update_visualization()
@@ -103,10 +119,10 @@ class SEAControlNode(Node):
         # Slider setup
         axcolor = 'lightgoldenrodyellow'
         self.ax_pos_des = plt.axes([0.2, 0.02, 0.65, 0.03], facecolor=axcolor)
-        self.slider_pos_des = Slider(self.ax_pos_des, 'Position Setpoint', -np.pi, np.pi, valinit=0.0)
+        self.slider_pos_des = Slider(self.ax_pos_des, 'Position Setpoint', -np.pi, np.pi, valinit=self.desired_position)
         self.slider_pos_des.on_changed(self.update_desired_position)
 
-        self.ani = animation.FuncAnimation(self.fig, self.update_visualization, interval=50, blit=False, repeat=False)
+        self.ani = animation.FuncAnimation(self.fig, self.update_visualization, interval=1000, blit=False, repeat=False)
         plt.show()
 
     def update_desired_position(self, val):
@@ -115,7 +131,7 @@ class SEAControlNode(Node):
     def update_visualization(self, *args):
         # Visualize the links based on the motor and spring positions
         theta_m = self.motor_position
-        theta_j = self.spring_position + self.motor_position
+        theta_j = self.joint_position
 
         x_j = self.base_position[0] + self.link_length * np.cos(theta_j)
         y_j = self.base_position[1] + self.link_length * np.sin(theta_j)
@@ -135,7 +151,8 @@ class SEAControlNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SEAControlNode()
+    desired_position = float(sys.argv[1]) 
+    node = SEAControlNode(desired_position)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
