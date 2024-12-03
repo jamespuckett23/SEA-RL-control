@@ -2,7 +2,7 @@
 
 ## Description
 
-This project approaches the full state feedback control problem for series elastic actuators from a reinforcement learning perspective. Traditional full state feedback control techniques do no address nonlinearities such as spring hysteresis, gear backlash, and friction. With RL there is potential to learn how to compensate for such nonlinearities. This project includes intends to create a simulation environment for training control algorithms for series elastic actuators and a hardware interface to control series elastic actuators via the ROS2 software framework. 
+This project approaches the full state feedback control problem for series elastic actuators from a reinforcement learning perspective. Traditional full state feedback control techniques do no address nonlinearities such as spring hysteresis, gear backlash, and friction. With RL there is potential to learn how to compensate for such nonlinearities. This project intends to create a simulation environment for training control algorithms for series elastic actuators and a hardware interface to control series elastic actuators via the ROS2 software framework. 
 
 ## Features
 
